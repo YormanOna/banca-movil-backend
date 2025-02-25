@@ -1,7 +1,10 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from models import db, User, Card, Payment, Transaction
 from config import Config
 import pyrebase
+from PyPDF2 import PageObject, PdfWriter
+from reportlab.pdfgen import canvas
+from io import BytesIO
 import requests
 
 app = Flask(__name__)
@@ -147,6 +150,26 @@ def get_transactions(user_id):
 def get_cards(user_id):
     cards = Card.query.filter_by(user_id=user_id).all()
     return jsonify([{'id': c.id, 'card_number': c.card_number, 'is_frozen': c.is_frozen, 'balance': c.balance} for c in cards])
+
+
+@app.route('/transactions/<int:user_id>/pdf', methods=['GET'])
+def download_transactions_pdf(user_id):
+    transactions = Transaction.query.join(Payment).filter(Payment.user_id == user_id).all()
+    buffer = BytesIO()
+    pdf = PdfWriter()
+    pdf.add_page(PageObject.create_blank_page(None, 612, 792))  # Tamaño carta
+    
+    # Usar reportlab para agregar contenido detallado
+    c = canvas.Canvas(buffer)
+    c.drawString(100, 750, f"Historial de Transacciones - Usuario {user_id}")
+    y = 700
+    for t in transactions:
+        c.drawString(100, y, f"{t.timestamp}: {t.details} - ${t.payment.amount}")
+        y -= 20
+    c.save()
+    
+    buffer.seek(0)
+    return send_file(buffer, as_attachment=True, download_name='historial.pdf', mimetype='application/pdf')
 
 if __name__ == '__main__':
     app.run(debug=True)
