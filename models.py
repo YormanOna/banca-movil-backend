@@ -8,13 +8,13 @@ class User(db.Model):
     firebase_uid = db.Column(db.String(255), unique=True, nullable=False)  # ID de Firebase
     name = db.Column(db.String(100), nullable=False)
     email = db.Column(db.String(120), unique=True, nullable=False)
-    balance = db.Column(db.Float, default=0.0)
     cards = db.relationship('Card', backref='user', lazy=True)
     payments = db.relationship('Payment', backref='user', lazy=True)
 
 class Card(db.Model):
     __tablename__ = 'cards'
     id = db.Column(db.Integer, primary_key=True)
+    balance = db.Column(db.Float, default=0.0)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
     card_number = db.Column(db.String(16), nullable=False)
     is_frozen = db.Column(db.Boolean, default=False)

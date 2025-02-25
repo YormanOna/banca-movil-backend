@@ -38,29 +38,44 @@ def register():
 def login():
     data = request.get_json()
     email, password = data.get('email'), data.get('password')
+    
     try:
+        # Intentar iniciar sesión con Firebase Auth
         user = auth.sign_in_with_email_and_password(email, password)
+        
+        # Buscar al usuario en la base de datos local por su firebase_uid
         db_user = User.query.filter_by(firebase_uid=user['localId']).first()
+        
         if not db_user:
             return jsonify({'error': 'Usuario no encontrado en la base de datos'}), 404
+        
+        # Retornar solo los datos del usuario sin el balance ni las tarjetas
         return jsonify({
             'message': 'Inicio de sesión exitoso',
-            'user': {'id': db_user.id, 'name': db_user.name, 'email': db_user.email, 'balance': db_user.balance}
+            'user': {
+                'id': db_user.id,  # ID del usuario en la base de datos
+                'name': db_user.name,
+                'email': db_user.email
+            }
         })
-    except:
+    except Exception as e:
+        print(e)  # Imprimir el error para diagnosticar
         return jsonify({'error': 'Credenciales inválidas'}), 401
+
 
 # Agregar tarjeta
 @app.route('/cards', methods=['POST'])
 def add_card():
     data = request.get_json()
-    user_id, card_number = data.get('user_id'), data.get('card_number')
+    user_id, card_number, balance = data.get('user_id'), data.get('card_number'), data.get('balance', 0.0)
+
     if not all([user_id, card_number]) or len(card_number) != 16 or not card_number.isdigit():
         return jsonify({'error': 'Datos inválidos'}), 400
-    card = Card(user_id=user_id, card_number=card_number)
+
+    card = Card(user_id=user_id, card_number=card_number, balance=balance)
     db.session.add(card)
     db.session.commit()
-    return jsonify({'message': 'Tarjeta agregada', 'id': card.id}), 201
+    return jsonify({'message': 'Tarjeta agregada', 'id': card.id, 'balance': card.balance}), 201
 
 # Congelar tarjeta
 @app.route('/cards/<int:card_id>/freeze', methods=['PUT'])
@@ -75,19 +90,23 @@ def freeze_card(card_id):
 def process_payment():
     data = request.get_json()
     user_id, amount, card_number = data.get('user_id'), data.get('amount'), data.get('card_number')
+
     if not all([user_id, amount, card_number]) or amount <= 0:
         return jsonify({'error': 'Datos inválidos'}), 400
-    user = User.query.get_or_404(user_id)
+
     card = Card.query.filter_by(card_number=card_number, user_id=user_id).first()
     if not card or card.is_frozen:
         return jsonify({'error': 'Tarjeta no válida o congelada'}), 400
-    if user.balance < amount:
+
+    if card.balance < amount:
         return jsonify({'error': 'Saldo insuficiente'}), 400
-    
+
+    # Crear pago y transacción
     payment = Payment(user_id=user_id, amount=amount, card_number=card_number)
     transaction = Transaction(payment=payment, details=f'Pago de {amount} con tarjeta {card_number[-4:]}')
-    
-    user.balance -= amount
+
+    # Restar saldo a la tarjeta
+    card.balance -= amount
     db.session.add_all([payment, transaction])
     db.session.commit()
 
@@ -98,7 +117,7 @@ def process_payment():
         'Content-Type': 'application/json'
     }
     payload = {
-        'to': '/topics/user_' + str(user_id),  # Asume que el cliente se suscribe a este tópico
+        'to': '/topics/user_' + str(user_id),
         'notification': {
             'title': 'Pago Realizado',
             'body': f'Has realizado un pago de ${amount} con éxito.'
@@ -127,7 +146,7 @@ def get_transactions(user_id):
 @app.route('/cards/<int:user_id>', methods=['GET'])
 def get_cards(user_id):
     cards = Card.query.filter_by(user_id=user_id).all()
-    return jsonify([{'id': c.id, 'card_number': c.card_number, 'is_frozen': c.is_frozen} for c in cards])
+    return jsonify([{'id': c.id, 'card_number': c.card_number, 'is_frozen': c.is_frozen, 'balance': c.balance} for c in cards])
 
 if __name__ == '__main__':
     app.run(debug=True)
